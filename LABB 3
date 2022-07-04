@@ -1,0 +1,128 @@
+.org    $0000 ;hoppar till denna address
+rjmp     START
+.org    INT0addr
+rjmp     AVBROTT_0
+.org    INT1addr
+rjmp     AVBROTT_1
+.org    INT_VECTORS_SIZE
+
+START:
+	;sätter stackpekare
+	ldi	r16, HIGH(RAMEND)
+	out	SPH, r16
+	ldi	r16, LOW(RAMEND)
+	out	SPL, r16
+SETUP:	
+	;konf. utportar
+	ldi		r16,$FF
+	out		DDRB,r16
+	ldi		r16, $03
+	out		DDRA,r16 ;själva klockan
+
+.dseg
+TIME:
+.byte		4 ; då det är 4 platser
+
+CURRENT_DISPLAY:	
+.byte		1
+.cseg
+
+INIT:
+	;konf. trig settings för INT0 och INT1
+	ldi     r16,(1<<ISC01) |(0<<ISC00) |(1<<ISC11) |(0<<ISC10)
+	out     MCUCR,r16
+	;aktivera INT0 och INT1
+	ldi     r16,(1<<INT0) |(1<<INT1)
+	out     GICR,r16
+	sei ;låter en interupta var som helst i koden
+
+MAIN: 
+	jmp     MAIN
+
+AVBROTT_0:
+	push    r16
+	in      r16,SREG
+	push    r16
+	call	BCD
+	pop     r16
+	out     SREG,r16
+	pop     r16
+	reti	
+
+AVBROTT_1:
+	push    r16
+	in      r16,SREG
+	push    r16	
+	call	MUX
+	pop     r16
+	out     SREG,r16
+	pop     r16
+	reti
+
+MUX:
+	push	XL
+	push	XH
+	push	ZL
+	push	ZH
+	push	r18
+
+	ldi		XL, LOW(TIME)
+	ldi		XH, HIGH(TIME)
+	lds		r18,CURRENT_DISPLAY ;laddar in platsen från SRAM
+	add		XL,r18
+	ld		r16,X ;laddar in värdet på TIME på r16
+
+	ldi		ZL,LOW(NUMBERS*2)
+	ldi		ZH,HIGH(NUMBERS*2)
+	add		ZL,r16
+	lpm		r16,Z ;laddar in rätt binärkod för rätt siffra
+	out		PORTB,r16 ;matar ut siffran
+	out		PORTA,r18 ;matar ut rätt siffra på rätt plats
+
+	inc		r18
+	sts		CURRENT_DISPLAY,r18
+	cpi		r18,4
+	brne	CLOSE
+	clr		r18
+	sts		CURRENT_DISPLAY,r18
+CLOSE:
+	pop		r18
+	pop		ZH
+	pop		ZL
+	pop		XH
+	pop		XL
+	ret
+
+BCD:
+	push	XL
+	push	XH
+	push	ZL
+	push	ZH
+	push	r17
+
+    ldi		XL,LOW(TIME)
+	ldi		XH,HIGH(TIME)
+	ldi		ZL,LOW(TIME_LIMIT*2)
+	ldi		ZH,HIGH(TIME_LIMIT*2)
+CHECK:
+	ld		r16,X ;det som finns på X laddas in på r16
+	inc		r16	;+1 sekund
+	lpm		r17,Z+ ;laddar in för att kunna jämföra med r16
+	cp		r16,r17
+	brne	STORE ;inte lika med varandra skriver vi ut
+	clr		r16
+	st		X+,r16
+	rjmp	CHECK
+STORE: 
+    st		X,r16
+DONE:
+	pop		r17
+	pop		ZH
+	pop		ZL
+	pop		XH
+	pop		XL
+    reti
+
+NUMBERS: .db	$3F, $06, $5B, $4F, $66, $6D, $7C, $07, $7F, $67 ;översätta binär till klocka från 0-9, A är LSB
+
+TIME_LIMIT: .db		10,6,10,6
